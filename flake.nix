@@ -2,7 +2,9 @@
   description = "A collection of of-the-star's opinionated nix flake templates";
 
   outputs =
-    { self }:
+    {
+      self,
+    }:
     {
       templates = {
         default = {

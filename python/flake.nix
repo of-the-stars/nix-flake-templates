@@ -16,6 +16,7 @@
       system:
       let
         pkgs = import nixpkgs { inherit system; };
+        # TODO: Change package name
         name = "foo";
         src = ./.;
       in
@@ -32,6 +33,7 @@
 
         packages.default = derivation {
           inherit system name src;
+          # TODO: Add package build step
           builder = with pkgs; "${bash}/bin/bash";
           args = [
             "-c"

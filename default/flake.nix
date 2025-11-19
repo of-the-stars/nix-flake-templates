@@ -16,6 +16,7 @@
       system:
       let
         pkgs = import nixpkgs { inherit system; };
+        # TODO: Change package name
         name = "foo";
         src = ./.;
       in
@@ -24,7 +25,7 @@
           with pkgs;
           mkShell {
             buildInputs = [
-              # Place development dependencies in here
+              # TODO: Place development dependencies in here
               # package managers, build tools, debuggers, etc
 
               # for example
@@ -34,6 +35,7 @@
 
         packages.default = derivation {
           inherit system name src;
+          # TODO: Add package build step
           builder = with pkgs; "${bash}/bin/bash";
           args = [
             "-c"
