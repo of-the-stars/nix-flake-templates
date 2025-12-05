@@ -21,6 +21,11 @@
           path = ./python;
           description = "A python development flake";
         };
+
+        arduino = {
+          path = ./arduino;
+          description = "A rust development flake for targeting the Arduino Uno";
+        };
       };
     };
 }
