@@ -1,5 +1,5 @@
 {
-  description = "of-the-star's custom rust development flake";
+  description = "of-the-star's custom arduino development flake";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
@@ -9,6 +9,7 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    ravedude.url = "github:Rahix/avr-hal?dir=ravedude";
   };
 
   outputs =
@@ -18,6 +19,7 @@
       flake-utils,
       naersk,
       rust-overlay,
+      ravedude,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
@@ -48,6 +50,11 @@
               rustc
               rustfmt
 
+              avrdude
+              avrlibc
+              pkgsCross.avr.buildPackages.binutils
+              pkgsCross.avr.buildPackages.gcc
+              ravedude.packages."${system}".default
             ];
 
             RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
