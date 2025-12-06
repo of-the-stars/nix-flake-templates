@@ -9,7 +9,6 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    ravedude.url = "github:Rahix/avr-hal?dir=ravedude";
   };
 
   outputs =
@@ -19,13 +18,15 @@
       flake-utils,
       naersk,
       rust-overlay,
-      ravedude,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
       let
         pkgs = import nixpkgs {
           inherit system;
+          crossSystem = {
+            config = "avr-none";
+          };
           overlays = [ (import rust-overlay) ];
         };
 
@@ -38,23 +39,25 @@
         };
       in
       {
-        devShell =
+        devShells.default =
           with pkgs;
           mkShell {
             buildInputs = [
+              avrlibc
+            ];
+
+            nativeBuildInputs = [
+              avrdude
               cargo
               cargo-info
               clippy
               just
+              pkgsCross.avr.buildPackages.binutils
+              pkgsCross.avr.buildPackages.gcc
+              ravedude
               rust-analyzer
               rustc
               rustfmt
-
-              avrdude
-              avrlibc
-              pkgsCross.avr.buildPackages.binutils
-              pkgsCross.avr.buildPackages.gcc
-              ravedude.packages."${system}".default
             ];
 
             RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
