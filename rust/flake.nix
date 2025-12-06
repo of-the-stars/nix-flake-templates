@@ -27,8 +27,10 @@
           overlays = [ (import rust-overlay) ];
         };
 
+        # Builds the rust components from the toolchain file
         toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
 
+        # Tells nix which rust components to use to build the package
         naersk-package = pkgs.callPackage naersk {
           cargo = toolchain;
           rustc = toolchain;
@@ -40,6 +42,7 @@
           with pkgs;
           mkShell {
             buildInputs = [
+              rustup
               cargo
               cargo-info
               clippy

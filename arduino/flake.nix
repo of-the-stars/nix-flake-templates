@@ -1,3 +1,7 @@
+# This template automatically sets up a development environment to automatically build and flash
+#   a rust program to any avr chip, specifically for the Arduino Uno. Simply write, save,and run
+#   `cargo run` to flash the chip.
+
 {
   description = "of-the-star's custom arduino development flake";
 
@@ -24,14 +28,20 @@
       let
         pkgs = import nixpkgs {
           inherit system;
+          # Configure the system for cross compilation
           crossSystem = {
-            config = "avr-none";
+            # Tells nixpkgs the target system
+            config = "avr";
+            # Tells rust the target system
+            rustc.config = "avr-none";
           };
           overlays = [ (import rust-overlay) ];
         };
 
+        # Builds the rust components from the toolchain file
         toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
 
+        # Tells nix which rust components to use to build the package
         naersk-package = pkgs.callPackage naersk {
           cargo = toolchain;
           rustc = toolchain;
@@ -41,12 +51,14 @@
       {
         devShells.default =
           with pkgs;
-          mkShell {
+          # Use the pkgsCross.avr version of mkShell to let nix pick which systems to use
+          pkgs.pkgsCross.avr.mkShell {
             buildInputs = [
               avrlibc
             ];
 
             nativeBuildInputs = [
+              rustup
               avrdude
               cargo
               cargo-info
