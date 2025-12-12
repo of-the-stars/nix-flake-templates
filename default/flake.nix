@@ -31,6 +31,11 @@
               # for example
               gnumake # this is a build tool, you just add the package name
             ];
+
+            # Run whatever commands you'd like when entering the shell
+            shellHook = ''
+              echo "Entering nix shell!!";
+            '';
           };
 
         packages.default = derivation {
