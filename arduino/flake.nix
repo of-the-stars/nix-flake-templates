@@ -1,14 +1,10 @@
-# This template automatically sets up a development environment to automatically build and flash
-#   a rust program to any avr chip, specifically for the Arduino Uno. Simply write, save,and run
-#   `cargo run` to flash the chip.
-
 {
-  description = "of-the-star's custom arduino development flake";
+  description = "of-the-star's custom arduino rust development flake";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
-    naersk.url = "github:nix-community/naersk/master";
     flake-utils.url = "github:numtide/flake-utils";
+    crane.url = "github:ipetkov/crane";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -20,64 +16,152 @@
       self,
       nixpkgs,
       flake-utils,
-      naersk,
+      crane,
       rust-overlay,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
       let
+        buildTarget = "avr-none";
+
         pkgs = import nixpkgs {
           inherit system;
-          # Configure the system for cross compilation
-          crossSystem = {
-            # Tells nixpkgs the target system
-            config = "avr";
-            # Tells rust the target system
-            rustc.config = "avr-none";
-          };
           overlays = [ (import rust-overlay) ];
         };
 
-        # Builds the rust components from the toolchain file
-        toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+        # Imports custom toolchain, or falls back to default for AVR projects
+        rust-toolchain =
+          if builtins.pathExists ./rust-toolchain.toml then
+            pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml
+          else
+            pkgs.rust-bin.selectLatestNightlyWith (
+              toolchain:
+              toolchain.minimal.override {
+                extensions = [ "rust-src" ];
+              }
+            );
 
-        # Tells nix which rust components to use to build the package
-        naersk-package = pkgs.callPackage naersk {
-          cargo = toolchain;
-          rustc = toolchain;
-          clippy = toolchain;
+        # Instantiates custom craneLib using toolchain
+        craneLib = (crane.mkLib pkgs).overrideToolchain rust-toolchain;
+
+        src = craneLib.cleanCargoSource ./.;
+        pname = craneLib.crateNameFromCargoToml { cargoToml = ./Cargo.toml; }.pname;
+
+        # Common arguments shared between buildPackage and buildDepsOnly
+        commonArgs = rec {
+          inherit src;
+          strictDeps = true;
+
+          doCheck = false;
+
+          # Helps vendor 'core' so that all its dependencies can be found
+          cargoVendorDir = craneLib.vendorMultipleCargoDeps {
+            inherit (craneLib.findCargoFiles src) cargoConfigs;
+            cargoLockList = [
+              ./Cargo.lock
+              ./toolchain/Cargo.lock
+            ];
+          };
+
+          buildInputs = with pkgs; [
+            pkgsCross.avr.buildPackages.gcc
+            ravedude
+          ];
+
+          # '-Z build-std=core' is required because precompiled artifacts aren't available for the 'avr-none' target
+          cargoExtraArgs = ''
+            --release -Z build-std=core
+          '';
+
+          # Skips Crane's default 'cargo check' step since the 'avr-none' target is a 'no_std' environment
+          buildPhaseCargoCommand = ''
+            cargo build ${cargoExtraArgs}
+          '';
+
+          env = {
+            CARGO_BUILD_TARGET = "${buildTarget}";
+            RUSTFLAGS = "-C target-cpu=atmega328p -C panic=abort";
+            CARGO_TARGET_AVR_NONE_LINKER = "${pkgs.pkgsCross.avr.stdenv.cc}/bin/${pkgs.pkgsCross.avr.stdenv.cc.targetPrefix}cc";
+          };
+        };
+
+        # Lets us reuse artifacts from the project dependencies
+        cargoArtifacts = craneLib.buildDepsOnly (
+          commonArgs
+          // {
+            # Works around Crane's opinionated dummy source, which doesn't work with the 'no_std' and 'no_main' modifiers
+            dummyBuildrs = pkgs.writeText "build.rs" ''fn main () { }'';
+            dummyrs = pkgs.writeText "dummy.rs" ''
+              #![no_main]
+              #![no_std]
+
+              use panic_halt as _;
+
+              #[arduino_hal::entry]
+              fn main() -> ! {
+                loop { }
+              }
+            '';
+          }
+        );
+
+        crane-package = craneLib.buildPackage (
+          commonArgs
+          // {
+            inherit cargoArtifacts;
+
+            # We manage the installation of the resulting binary ourselves
+            doNotPostBuildInstallCargoBinaries = true;
+            installPhaseCommand = ''
+              mkdir -p $out/bin
+              cp ./Ravedude.toml $out/.
+              cp ./target/${buildTarget}/release/*.elf $out/bin/.
+            '';
+          }
+        );
+
+        # Create a shell script to use Ravedude to flash the binary so that we can flash it with `nix run`
+        flash-firmware = pkgs.writeShellApplication {
+          name = pname;
+          runtimeInputs = with pkgs; [
+            avrdude
+            pkgsCross.avr.buildPackages.gcc
+            ravedude
+          ];
+          text = ''
+            CARGO_MANIFEST_DIR=${crane-package} ravedude ${crane-package}/bin/*.elf
+          '';
         };
       in
       {
-        devShells.default =
-          with pkgs;
-          # Use the pkgsCross.avr version of mkShell to let nix pick which systems to use
-          pkgs.pkgsCross.avr.mkShell {
-            buildInputs = [
-              avrlibc
-            ];
+        devShells.default = pkgs.mkShell {
+          # Inherits buildInputs from crane-package
+          inputsFrom = [ crane-package ];
 
-            nativeBuildInputs = [
-              rustup
-              avrdude
-              cargo
-              cargo-info
-              clippy
-              just
-              pkgsCross.avr.buildPackages.binutils
-              pkgsCross.avr.buildPackages.gcc
-              ravedude
-              rust-analyzer
-              rustc
-              rustfmt
-            ];
+          # Additional packages for the dev environment
+          packages = with pkgs; [
+            cargo-cache
+          ];
 
-            RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
-
-            shellHook = '''';
+          env = {
+            CARGO_BUILD_TARGET = "${buildTarget}";
+            # Needed for rust-analyzer
+            RUST_SRC_PATH = "${rust-toolchain}/lib/rustlib/src/rust/library";
           };
+        };
 
-        packages.default = naersk-package.buildPackage ./.;
+        # Shell script invoked via `nix run .#updateSrc` to keep the 'core' library lockfile up to date
+        # TODO: Make this more automatic while avoiding IFD
+        apps.updateSrc = flake-utils.lib.mkApp {
+          drv = pkgs.writeShellScriptBin "update-rust-src-lockfile" ''
+            cp "${rust-toolchain}"/lib/rustlib/src/rust/library/Cargo.lock ./toolchain/.
+          '';
+        };
+
+        # Gives us a default package to use 'nix run' with
+        packages.default = flash-firmware;
+
+        formatter.${system} = nixpkgs.legacyPackages.${system}.nixfmt-tree;
       }
     );
 }

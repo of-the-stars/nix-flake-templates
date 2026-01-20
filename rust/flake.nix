@@ -3,8 +3,8 @@
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
-    naersk.url = "github:nix-community/naersk/master";
     flake-utils.url = "github:numtide/flake-utils";
+    crane.url = "github:ipetkov/crane";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -16,7 +16,7 @@
       self,
       nixpkgs,
       flake-utils,
-      naersk,
+      crane,
       rust-overlay,
     }:
     flake-utils.lib.eachDefaultSystem (
@@ -27,38 +27,62 @@
           overlays = [ (import rust-overlay) ];
         };
 
-        # Builds the rust components from the toolchain file
-        toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+        # Builds the rust components from the toolchain file, or defaults back to the latest nightly build
+        rust-toolchain =
+          if builtins.pathExists ./rust-toolchain.toml then
+            pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml
+          else
+            pkgs.rust-bin.selectLatestNightlyWith (
+              toolchain:
+              toolchain.default.override {
+                # extensions = [ "rust-src" ];
+              }
+            );
 
-        # Tells nix which rust components to use to build the package
-        naersk-package = pkgs.callPackage naersk {
-          cargo = toolchain;
-          rustc = toolchain;
-          clippy = toolchain;
+        # Instantiates custom craneLib using toolchain
+        craneLib = (crane.mkLib pkgs).overrideToolchain rust-toolchain;
+
+        src = craneLib.cleanCargoSource ./.;
+        pname = craneLib.crateNameFromCargoToml { cargoToml = ./Cargo.toml; }.pname;
+
+        # Common arguments shared between buildPackage and buildDepsOnly
+        commonArgs = {
+          inherit src;
+          strictDeps = true;
+
+          buildInputs = with pkgs; [
+          ];
         };
+
+        cargoArtifacts = craneLib.buildDepsOnly (commonArgs);
+
+        crane-package = craneLib.buildPackage (
+          commonArgs
+          // {
+            inherit cargoArtifacts;
+          }
+        );
       in
       {
-        devShells.default =
-          with pkgs;
-          mkShell {
-            buildInputs = [
-              rustup
-              cargo
-              cargo-info
-              clippy
-              just
-              rust-analyzer
-              rustc
-              rustfmt
+        devShells.default = pkgs.mkShell {
+          # Inherits buildInputs from crane-package
+          inputsFrom = [ crane-package ];
 
-            ];
+          # Additional packages for the dev environment
+          packages = with pkgs; [
+          ];
 
-            RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
+          shellHook = '''';
 
-            shellHook = '''';
+          env = {
+            # Needed for rust-analyzer
+            RUST_SRC_PATH = "${rust-toolchain}/lib/rustlib/src/rust/library";
           };
+        };
 
-        packages.default = naersk-package.buildPackage ./.;
+        packages.default = crane-package;
+
+        formatter.${system} = nixpkgs.legacyPackages.${system}.nixfmt-tree;
       }
     );
 }

@@ -40,6 +40,9 @@
             "echo Building! > $out"
           ];
         };
+
+        formatter.${system} = nixpkgs.legacyPackages.${system}.nixfmt-tree;
+
       }
     );
 }

@@ -17,29 +17,27 @@
       let
         pkgs = import nixpkgs { inherit system; };
         # TODO: Change package name
-        name = "foo";
+        pname = "foo";
         src = ./.;
       in
       {
-        devShells.default =
-          with pkgs;
-          mkShell {
-            buildInputs = [
-              # TODO: Place development dependencies in here
-              # package managers, build tools, debuggers, etc
+        devShells.default = pkgs.mkShell {
+          buildInputs = with pkgs; [
+            # TODO: Place development dependencies in here
+            # package managers, build tools, debuggers, etc
 
-              # for example
-              gnumake # this is a build tool, you just add the package name
-            ];
+            # for example
+            gnumake # this is a build tool, you just add the package name
+          ];
 
-            # Run whatever commands you'd like when entering the shell
-            shellHook = ''
-              echo "Entering nix shell!!";
-            '';
-          };
+          # Run whatever commands you'd like when entering the shell
+          shellHook = ''
+            echo "Entering nix shell!!";
+          '';
+        };
 
         packages.default = derivation {
-          inherit system name src;
+          inherit system pname src;
           # TODO: Add package build step
           builder = with pkgs; "${bash}/bin/bash";
           args = [
@@ -47,6 +45,8 @@
             "echo foo > $out"
           ];
         };
+
+        formatter.${system} = nixpkgs.legacyPackages.${system}.nixfmt-tree;
       }
     );
 }
